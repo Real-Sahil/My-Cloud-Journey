@@ -177,7 +177,8 @@ def run(
             headless=headless,
             user_agent=USER_AGENT,
             viewport={"width": 1280, "height": 900},
-            args=["--no-first-run", "--no-default-browser-check"],
+            ignore_https_errors=True,
+            args=["--no-first-run", "--no-default-browser-check", "--disable-web-security", "--ignore-certificate-errors"],
         )
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
 
