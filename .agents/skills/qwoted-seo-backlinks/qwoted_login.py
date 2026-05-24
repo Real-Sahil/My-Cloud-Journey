@@ -138,6 +138,8 @@ def run(
     reset: bool = False,
     timeout_s: int = DEFAULT_LOGIN_TIMEOUT_S,
     force: bool = False,
+    email: str | None = None,
+    password: str | None = None,
 ) -> bool:
     """Open Chromium, wait for the user to log in, save cookies. Returns True on success.
 
@@ -199,7 +201,20 @@ def run(
         if _is_logged_in_url(current_url):
             log("already logged in via saved profile — skipping interactive step")
         else:
-            if headless:
+            # Automated credential login (headless-safe)
+            if email and password:
+                log(f"attempting automated login as {email}")
+                try:
+                    page.fill('input[name="user[email]"], input[type="email"]', email, timeout=10_000)
+                    page.fill('input[name="user[password]"], input[type="password"]', password, timeout=10_000)
+                    page.click('input[type="submit"], button[type="submit"]', timeout=10_000)
+                    page.wait_for_url(lambda url: _is_logged_in_url(url), timeout=30_000)
+                    log(f"  automated login succeeded — now at: {page.url}")
+                except Exception as e:
+                    log(f"ERROR during automated login: {e}")
+                    ctx.close()
+                    return False
+            elif headless:
                 log(
                     "ERROR: --headless mode but not already logged in. "
                     "Re-run without --headless so you can sign in manually "
@@ -207,49 +222,49 @@ def run(
                 )
                 ctx.close()
                 return False
-
-            print("\n" + "=" * 70, file=sys.stderr)
-            print(
-                "  >>> A Chromium window just opened on your desktop.\n"
-                "      Please sign in to Qwoted IN THAT WINDOW (not in your\n"
-                "      regular Chrome/Safari — a different browser means\n"
-                "      different cookies and this script will never see your\n"
-                "      login).\n"
-                "      As soon as you're on a logged-in page, this script will\n"
-                "      detect it automatically and save your session.\n"
-                f"      (timeout: {timeout_s} seconds — re-run if you need more)",
-                file=sys.stderr,
-            )
-            print("=" * 70 + "\n", file=sys.stderr)
-
-            deadline = time.time() + timeout_s
-            last_logged_url = None
-            next_status_log = time.time() + 5.0
-            while time.time() < deadline:
-                try:
-                    current = page.url
-                    if _is_logged_in_url(current):
-                        break
-                    if time.time() >= next_status_log:
-                        if current != last_logged_url:
-                            log(f"  waiting... Chromium is currently on: {current}")
-                            last_logged_url = current
-                        else:
-                            log(f"  still waiting on: {current}  (sign in IN THIS WINDOW, not another browser)")
-                        next_status_log = time.time() + 5.0
-                except Exception:
-                    pass
-                time.sleep(1.0)
             else:
-                log(
-                    f"ERROR: did not detect login within {timeout_s}s. "
-                    f"Last URL seen in Chromium: {last_logged_url or 'unknown'}. "
-                    f"If you signed in to Qwoted in a different browser, that won't work — "
-                    f"you must sign in IN THE CHROMIUM WINDOW this script opened. "
-                    f"Re-run with --reset to start clean."
+                print("\n" + "=" * 70, file=sys.stderr)
+                print(
+                    "  >>> A Chromium window just opened on your desktop.\n"
+                    "      Please sign in to Qwoted IN THAT WINDOW (not in your\n"
+                    "      regular Chrome/Safari — a different browser means\n"
+                    "      different cookies and this script will never see your\n"
+                    "      login).\n"
+                    "      As soon as you're on a logged-in page, this script will\n"
+                    "      detect it automatically and save your session.\n"
+                    f"      (timeout: {timeout_s} seconds — re-run if you need more)",
+                    file=sys.stderr,
                 )
-                ctx.close()
-                return False
+                print("=" * 70 + "\n", file=sys.stderr)
+
+                deadline = time.time() + timeout_s
+                last_logged_url = None
+                next_status_log = time.time() + 5.0
+                while time.time() < deadline:
+                    try:
+                        current = page.url
+                        if _is_logged_in_url(current):
+                            break
+                        if time.time() >= next_status_log:
+                            if current != last_logged_url:
+                                log(f"  waiting... Chromium is currently on: {current}")
+                                last_logged_url = current
+                            else:
+                                log(f"  still waiting on: {current}  (sign in IN THIS WINDOW, not another browser)")
+                            next_status_log = time.time() + 5.0
+                    except Exception:
+                        pass
+                    time.sleep(1.0)
+                else:
+                    log(
+                        f"ERROR: did not detect login within {timeout_s}s. "
+                        f"Last URL seen in Chromium: {last_logged_url or 'unknown'}. "
+                        f"If you signed in to Qwoted in a different browser, that won't work — "
+                        f"you must sign in IN THE CHROMIUM WINDOW this script opened. "
+                        f"Re-run with --reset to start clean."
+                    )
+                    ctx.close()
+                    return False
 
             # Give Qwoted a couple more seconds to set any post-login cookies.
             log(f"  detected logged-in URL: {page.url}. Letting it settle...")
@@ -297,9 +312,24 @@ def main(argv: list[str] | None = None) -> int:
         help=f"Seconds to wait for the user to finish logging in "
              f"(default: {DEFAULT_LOGIN_TIMEOUT_S}).",
     )
+    p.add_argument(
+        "--email", type=str, default=None,
+        help="Email address for automated headless login (fills the form automatically).",
+    )
+    p.add_argument(
+        "--password", type=str, default=None,
+        help="Password for automated headless login (fills the form automatically).",
+    )
     args = p.parse_args(argv)
 
-    ok = run(headless=args.headless, reset=args.reset, timeout_s=args.timeout, force=args.force)
+    ok = run(
+        headless=args.headless,
+        reset=args.reset,
+        timeout_s=args.timeout,
+        force=args.force,
+        email=args.email,
+        password=args.password,
+    )
     if ok:
         result_line({"status": "logged_in", "cookie_jar": str(session_file())})
         return 0
